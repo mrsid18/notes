@@ -1,8 +1,22 @@
+FROM node:22-alpine AS frontend
+WORKDIR /frontend-build
+
+COPY . .
+
+WORKDIR /frontend-build/web
+
+RUN npm install -g pnpm
+RUN pnpm i --frozen-lockfile
+RUN pnpm build
+
 FROM golang:1.25-alpine AS backend
 WORKDIR /backend-build
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+COPY --from=frontend /frontend-build/web/dist /backend-build/server/router/frontend/dist
+
+
 # Please build frontend first, so that the static files are available.
 # Refer to `pnpm release` in package.json for the build command.
 RUN --mount=type=cache,target=/go/pkg/mod \
