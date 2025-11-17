@@ -1,7 +1,6 @@
 import axios from 'axios';
 
 import { env } from '@/lib/env';
-import { buildCookieHeader } from '@/lib/session-cookie';
 
 const httpClient = axios.create({
   baseURL: env.apiBaseUrl,
@@ -9,25 +8,23 @@ const httpClient = axios.create({
     Accept: 'application/json',
     'Content-Type': 'application/json',
   },
-  withCredentials: true,
 });
 
-let sessionCookieRef: string | null = null;
+let accessTokenRef: string | null = null;
 
 httpClient.interceptors.request.use((config) => {
-  const cookieHeader = buildCookieHeader(sessionCookieRef);
-  if (cookieHeader) {
+  if (accessTokenRef) {
     config.headers = config.headers ?? {};
-    config.headers.Cookie = cookieHeader;
-  } else if (config.headers && 'Cookie' in config.headers) {
-    delete config.headers.Cookie;
+    config.headers.Authorization = `Bearer ${accessTokenRef}`;
+  } else if (config.headers && 'Authorization' in config.headers) {
+    delete config.headers.Authorization;
   }
 
   return config;
 });
 
-export const setHttpClientSessionCookie = (cookie: string | null) => {
-  sessionCookieRef = cookie;
+export const setHttpClientAccessToken = (token: string | null) => {
+  accessTokenRef = token;
 };
 
 export default httpClient;

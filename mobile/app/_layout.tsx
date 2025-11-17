@@ -8,9 +8,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { AppProvider } from '@/providers/app-provider';
 import { useSessionStore } from '@/stores/session-store';
 
-export const unstable_settings = {
-  anchor: '(tabs)',
-};
+import '../global.css';
 
 function BootstrapGate({ children }: { children: React.ReactNode }) {
   const status = useSessionStore((state) => state.status);
@@ -35,8 +33,7 @@ export default function RootLayout() {
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <BootstrapGate>
           <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+            <Stack.Screen name="(app)" options={{ headerShown: false }} />
           </Stack>
         </BootstrapGate>
         <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
