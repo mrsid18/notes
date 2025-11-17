@@ -2,7 +2,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigation } from 'expo-router';
 import { DrawerActions } from '@react-navigation/native';
-import { useState } from 'react';
+import clsx from 'clsx';
+import dayjs from 'dayjs';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -14,7 +16,9 @@ import {
   View,
 } from 'react-native';
 
+import { ActivityCalendar, MonthNavigator } from '@/components/activity-calendar';
 import { DeleteConfirmationModal } from '@/components/delete-confirmation-modal';
+import { SearchBar } from '@/components/search-bar';
 import { memoService } from '@/services/memo-service';
 import { useSessionStore } from '@/stores/session-store';
 import type { Memo } from '@/types/api';
@@ -30,6 +34,13 @@ export default function NotesScreen() {
   const [editingMemoId, setEditingMemoId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
   const [memoPendingDeletion, setMemoPendingDeletion] = useState<Memo | null>(null);
+  const [visibleMonth, setVisibleMonth] = useState(dayjs().format('YYYY-MM'));
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null);
+  const [isCalendarVisible, setIsCalendarVisible] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterPreset, setFilterPreset] = useState<'all' | 'pinned'>('all');
+  const [sortDirection, setSortDirection] = useState<'desc' | 'asc'>('desc');
+  const [activePopover, setActivePopover] = useState<'filters' | 'sort' | null>(null);
 
   // Fetch memos - only if we have a token
   const {
@@ -126,6 +137,14 @@ export default function NotesScreen() {
     setMemoPendingDeletion(null);
   };
 
+  const handleMonthChange = (month: string) => {
+    setVisibleMonth(month);
+  };
+
+  const handleSelectCalendarDate = (date: string) => {
+    setSelectedCalendarDate((prev) => (prev === date ? null : date));
+  };
+
   const handleEditPress = (memo: Memo) => {
     setEditingMemoId(memo.name);
     setEditContent(memo.content);
@@ -134,6 +153,28 @@ export default function NotesScreen() {
   const handleCancelEdit = () => {
     setEditingMemoId(null);
     setEditContent('');
+  };
+
+  const handleClearSearch = () => {
+    setSearchQuery('');
+  };
+
+  const handleToggleCalendarVisibility = () => {
+    setIsCalendarVisible((prev) => !prev);
+  };
+
+  const togglePopover = (type: 'filters' | 'sort') => {
+    setActivePopover((prev) => (prev === type ? null : type));
+  };
+
+  const handleFilterPresetChange = (preset: 'all' | 'pinned') => {
+    setFilterPreset(preset);
+    setActivePopover(null);
+  };
+
+  const handleSortDirectionChange = (direction: 'desc' | 'asc') => {
+    setSortDirection(direction);
+    setActivePopover(null);
   };
 
   const renderMemoItem = ({ item }: { item: Memo }) => {
@@ -322,22 +363,231 @@ export default function NotesScreen() {
   }
 
   const memos = memosData?.memos || [];
+  const normalizedSearchQuery = useMemo(() => searchQuery.trim().toLowerCase(), [searchQuery]);
+  const activityStats = useMemo(() => {
+    return memos.reduce<Record<string, number>>((acc, memo) => {
+      const source = memo.displayTime ?? memo.createTime;
+      if (!source) {
+        return acc;
+      }
+      const key = dayjs(source).format('YYYY-MM-DD');
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+  }, [memos]);
+
+  const memosToRender = useMemo(() => {
+    let result = memos;
+
+    if (selectedCalendarDate) {
+      result = result.filter((memo) => {
+        const source = memo.displayTime ?? memo.createTime;
+        if (!source) {
+          return false;
+        }
+        return dayjs(source).format('YYYY-MM-DD') === selectedCalendarDate;
+      });
+    }
+
+    if (filterPreset === 'pinned') {
+      result = result.filter((memo) => memo.pinned);
+    }
+
+    if (normalizedSearchQuery.length > 0) {
+      result = result.filter((memo) => {
+        const content = memo.content.toLowerCase();
+        const tags = memo.tags?.join(' ').toLowerCase() ?? '';
+        return content.includes(normalizedSearchQuery) || tags.includes(normalizedSearchQuery);
+      });
+    }
+
+    const sorted = [...result].sort((a, b) => {
+      const aTime = dayjs(a.displayTime ?? a.createTime ?? 0).valueOf();
+      const bTime = dayjs(b.displayTime ?? b.createTime ?? 0).valueOf();
+      return sortDirection === 'desc' ? bTime - aTime : aTime - bTime;
+    });
+
+    return sorted;
+  }, [memos, selectedCalendarDate, filterPreset, normalizedSearchQuery, sortDirection]);
+
+  const hasSearchQuery = normalizedSearchQuery.length > 0;
+  const isFilteringByDate = Boolean(selectedCalendarDate);
+  const isPinnedFilterActive = filterPreset === 'pinned';
+  const emptyStateCopy = useMemo(() => {
+    if (isFilteringByDate && hasSearchQuery) {
+      return {
+        title: 'No notes match this date and search',
+        description: 'Try clearing one of the filters or adjust your keywords.',
+      };
+    }
+
+    if (isFilteringByDate) {
+      return {
+        title: 'No notes for this date',
+        description: 'Pick another day or clear the date filter to see all notes.',
+      };
+    }
+
+    if (hasSearchQuery) {
+      return {
+        title: 'No notes match your search',
+        description: 'Try different keywords or clear the search field.',
+      };
+    }
+
+    if (isPinnedFilterActive) {
+      return {
+        title: 'No pinned notes yet',
+        description: 'Pin a memo to keep it handy here.',
+      };
+    }
+
+    return {
+      title: 'No notes yet',
+      description: 'Create your first note to get started',
+    };
+  }, [hasSearchQuery, isFilteringByDate, isPinnedFilterActive]);
+
   const isDeleteModalVisible = Boolean(memoPendingDeletion);
 
   return (
     <View className="flex-1 bg-background">
       {/* Header */}
-      <View className="border-b border-border bg-card px-6 py-4">
-        <View className="flex-row items-center">
-          <Pressable
-            onPress={() => navigation.dispatch(DrawerActions.openDrawer())}
-            className="mr-4"
-          >
-            <Ionicons name="menu" size={24} color="#64748b" />
-          </Pressable>
-          <Text className="text-3xl font-bold text-foreground">Notes</Text>
+      <View className="relative z-30 border-b border-border bg-card px-6 pb-4 pt-12">
+        <View className="flex-row items-center justify-between gap-3">
+          <View className="flex-1 flex-row items-center gap-3">
+            <Pressable
+              onPress={() => navigation.dispatch(DrawerActions.openDrawer())}
+              className="mr-1"
+              accessibilityLabel="Open navigation menu"
+              hitSlop={8}
+            >
+              <Ionicons name="menu" size={24} color="#64748b" />
+            </Pressable>
+            <View className="flex-1">
+              <SearchBar
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                onClear={handleClearSearch}
+                placeholder="Search notes..."
+              />
+            </View>
+          </View>
+          <View className="flex-row items-center gap-2">
+            <Pressable
+              className={clsx(
+                'h-10 w-10 items-center justify-center rounded-full border bg-background',
+                isCalendarVisible ? 'border-primary/40 bg-primary/5' : 'border-border'
+              )}
+              onPress={handleToggleCalendarVisibility}
+              accessibilityLabel={isCalendarVisible ? 'Hide calendar' : 'Show calendar'}
+              hitSlop={8}
+            >
+              <Ionicons
+                name={isCalendarVisible ? 'calendar-outline' : 'eye-off-outline'}
+                size={18}
+                color={isCalendarVisible ? '#0ea5e9' : '#64748b'}
+              />
+            </Pressable>
+            <View className="relative">
+              <Pressable
+                className="h-10 w-10 items-center justify-center rounded-full border border-border bg-background"
+                onPress={() => togglePopover('filters')}
+                accessibilityLabel="Toggle filters"
+                hitSlop={8}
+              >
+                <Ionicons name="funnel-outline" size={18} color="#64748b" />
+              </Pressable>
+              {activePopover === 'filters' && (
+                <View
+                  className="absolute right-0 top-12 z-40 w-48 rounded-2xl border border-border bg-card p-3 shadow-xl"
+                  style={{ elevation: 6 }}
+                >
+                  <Text className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Filters</Text>
+                  <Pressable
+                    onPress={() => handleFilterPresetChange('all')}
+                    className={clsx(
+                      'mb-2 flex-row items-center justify-between rounded-xl border px-3 py-2',
+                      filterPreset === 'all'
+                        ? 'border-primary/50 bg-primary/5'
+                        : 'border-border/40 bg-background'
+                    )}
+                  >
+                    <Text className="text-sm text-foreground">All notes</Text>
+                    {filterPreset === 'all' && <Ionicons name="checkmark" size={16} color="#22c55e" />}
+                  </Pressable>
+                  <Pressable
+                    onPress={() => handleFilterPresetChange('pinned')}
+                    className={clsx(
+                      'flex-row items-center justify-between rounded-xl border px-3 py-2',
+                      filterPreset === 'pinned'
+                        ? 'border-primary/50 bg-primary/5'
+                        : 'border-border/40 bg-background'
+                    )}
+                  >
+                    <Text className="text-sm text-foreground">Pinned only</Text>
+                    {filterPreset === 'pinned' && <Ionicons name="checkmark" size={16} color="#22c55e" />}
+                  </Pressable>
+                </View>
+              )}
+            </View>
+            <View className="relative">
+              <Pressable
+                className="h-10 w-10 items-center justify-center rounded-full border border-border bg-background"
+                onPress={() => togglePopover('sort')}
+                accessibilityLabel="Toggle sort options"
+                hitSlop={8}
+              >
+                <Ionicons name="swap-vertical" size={18} color="#64748b" />
+              </Pressable>
+              {activePopover === 'sort' && (
+                <View
+                  className="absolute right-0 top-12 z-40 w-48 rounded-2xl border border-border bg-card p-3 shadow-xl"
+                  style={{ elevation: 6 }}
+                >
+                  <Text className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Sort</Text>
+                  <Pressable
+                    onPress={() => handleSortDirectionChange('desc')}
+                    className={clsx(
+                      'mb-2 flex-row items-center justify-between rounded-xl border px-3 py-2',
+                      sortDirection === 'desc'
+                        ? 'border-primary/50 bg-primary/5'
+                        : 'border-border/40 bg-background'
+                    )}
+                  >
+                    <Text className="text-sm text-foreground">Newest first</Text>
+                    {sortDirection === 'desc' && <Ionicons name="checkmark" size={16} color="#22c55e" />}
+                  </Pressable>
+                  <Pressable
+                    onPress={() => handleSortDirectionChange('asc')}
+                    className={clsx(
+                      'flex-row items-center justify-between rounded-xl border px-3 py-2',
+                      sortDirection === 'asc'
+                        ? 'border-primary/50 bg-primary/5'
+                        : 'border-border/40 bg-background'
+                    )}
+                  >
+                    <Text className="text-sm text-foreground">Oldest first</Text>
+                    {sortDirection === 'asc' && <Ionicons name="checkmark" size={16} color="#22c55e" />}
+                  </Pressable>
+                </View>
+              )}
+            </View>
+          </View>
         </View>
       </View>
+
+      {isCalendarVisible && (
+        <View className="border-b border-border bg-card px-6 pb-6 pt-4">
+          <MonthNavigator month={visibleMonth} onMonthChange={handleMonthChange} />
+          <ActivityCalendar
+            month={visibleMonth}
+            selectedDate={selectedCalendarDate ?? undefined}
+            data={activityStats}
+            onSelectDate={handleSelectCalendarDate}
+          />
+        </View>
+      )}
 
       {/* Create Memo Section */}
       {isCreating && (
@@ -379,20 +629,49 @@ export default function NotesScreen() {
         </View>
       )}
 
+      {(selectedCalendarDate || isPinnedFilterActive) && (
+        <View className="border-b border-border bg-card px-6 py-3">
+          <View className="flex-row flex-wrap gap-2">
+            {selectedCalendarDate && (
+              <Pressable
+                onPress={() => setSelectedCalendarDate(null)}
+                className="flex-row items-center gap-2 rounded-full border border-border bg-background px-3 py-1.5"
+                accessibilityLabel="Clear date filter"
+              >
+                <Text className="text-xs font-medium text-foreground">
+                  {dayjs(selectedCalendarDate).format('MMM D, YYYY')}
+                </Text>
+                <Ionicons name="close" size={14} color="#64748b" />
+              </Pressable>
+            )}
+            {isPinnedFilterActive && (
+              <Pressable
+                onPress={() => handleFilterPresetChange('all')}
+                className="flex-row items-center gap-2 rounded-full border border-border bg-background px-3 py-1.5"
+                accessibilityLabel="Clear pinned filter"
+              >
+                <Text className="text-xs font-medium text-foreground">Pinned only</Text>
+                <Ionicons name="close" size={14} color="#64748b" />
+              </Pressable>
+            )}
+          </View>
+        </View>
+      )}
+
       {/* Memos List */}
-      {memos.length === 0 ? (
+      {memosToRender.length === 0 ? (
         <View className="flex-1 items-center justify-center px-6">
           <Ionicons name="document-text-outline" size={64} color="#94a3b8" />
           <Text className="mt-4 text-center text-lg font-semibold text-foreground">
-            No notes yet
+            {emptyStateCopy.title}
           </Text>
           <Text className="mt-2 text-center text-base text-muted-foreground">
-            Create your first note to get started
+            {emptyStateCopy.description}
           </Text>
         </View>
       ) : (
         <FlatList
-          data={memos}
+          data={memosToRender}
           renderItem={renderMemoItem}
           keyExtractor={(item) => item.name}
           contentContainerStyle={{ padding: 24, paddingBottom: 120 }}
